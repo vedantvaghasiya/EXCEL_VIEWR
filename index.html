@@ -25,13 +25,18 @@
     <style>
         * {
             box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
         }
         body {
             user-select: none;
+            -webkit-user-select: none;
             overflow: hidden;
+            touch-action: none;
         }
         input, textarea, select, [contenteditable="true"] {
             user-select: text;
+            -webkit-user-select: text;
+            touch-action: manipulation;
         }
         /* Custom crisp spreadsheet scrollbars */
         ::-webkit-scrollbar {
@@ -168,7 +173,7 @@
 <body class="bg-slate-100 text-slate-900 font-sans h-screen flex flex-col">
 
     <!-- ===================================================================== -->
-    <!-- 1. LOCKED LOGIN GATE (VEDANT / 1047)                                  -->
+    <!-- 1. AUTHENTICATION & OWNER-ONLY LOCK GATE (BLOCKS ALL DATA ON LOAD)    -->
     <!-- ===================================================================== -->
     <div id="authGateScreen" class="fixed inset-0 z-50 bg-slate-950 flex items-center justify-center p-4">
         <div class="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
@@ -176,56 +181,105 @@
             <div class="bg-emerald-700 px-6 py-5 text-white">
                 <div class="flex items-center gap-3">
                     <div class="bg-white/15 p-2.5 rounded-xl backdrop-blur-xs">
-                        <i data-lucide="shield-check" class="w-6 h-6 text-white"></i>
+                        <i data-lucide="sheet" class="w-6 h-6 text-white"></i>
                     </div>
                     <div>
                         <h1 class="text-lg font-bold tracking-tight">SheetVault</h1>
-                        <p class="text-xs text-emerald-100">Private Cloud Secured Spreadsheet</p>
+                        <p class="text-xs text-emerald-100">Private Cloud Spreadsheet & Master Vault</p>
                     </div>
                 </div>
             </div>
 
-            <!-- Simple Login Form -->
-            <div class="p-6 space-y-4">
-                <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 flex items-start gap-2.5">
-                    <i data-lucide="lock" class="w-4 h-4 text-emerald-600 shrink-0 mt-0.5"></i>
-                    <span>Enter your secure login ID and password to access your synced spreadsheets.</span>
+            <!-- Loading State while checking Firebase Auth -->
+            <div id="authLoadingBox" class="p-8 text-center space-y-3">
+                <div class="w-8 h-8 border-3 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto"></div>
+                <p class="text-xs font-medium text-slate-500">Verifying security credentials & vault lock...</p>
+            </div>
+
+            <!-- Login / Initial Owner Setup Form -->
+            <div id="authFormContainer" class="hidden p-6 space-y-4">
+                <div id="ownerStatusBanner" class="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 flex items-start gap-2.5">
+                    <i data-lucide="shield-check" class="w-4 h-4 text-emerald-600 shrink-0 mt-0.5"></i>
+                    <span id="ownerStatusText">Loading vault status...</span>
                 </div>
 
-                <form onsubmit="handleLoginSubmit(event)" class="space-y-3.5">
+                <!-- Mode Tabs (Sign In vs Initial Owner Registration) -->
+                <div id="authModeTabs" class="grid grid-cols-2 bg-slate-100 p-1 rounded-lg text-xs font-semibold">
+                    <button type="button" id="tabSignIn" onclick="switchAuthMode('signin')" class="py-1.5 rounded-md bg-white text-emerald-700 shadow-xs transition cursor-pointer">
+                        Owner Sign In
+                    </button>
+                    <button type="button" id="tabSignUp" onclick="switchAuthMode('signup')" class="py-1.5 rounded-md text-slate-600 hover:text-slate-900 transition cursor-pointer">
+                        Create Vault Login
+                    </button>
+                </div>
+
+                <form id="authForm" onsubmit="handleAuthSubmit(event)" class="space-y-3.5">
                     <div>
-                        <label class="block text-xs font-semibold text-slate-700 mb-1">Login ID</label>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Username or Email Address</label>
                         <div class="relative">
                             <i data-lucide="user" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
-                            <input type="text" id="loginIdInput" required placeholder="Enter ID" class="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600">
+                            <input type="text" id="authEmail" required placeholder="e.g. veduvaghasiya@gmail.com" class="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600">
                         </div>
                     </div>
 
                     <div>
-                        <label class="block text-xs font-semibold text-slate-700 mb-1">Password</label>
+                        <label class="block text-xs font-semibold text-slate-700 mb-1">Master Password</label>
                         <div class="relative">
-                            <i data-lucide="key-round" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
-                            <input type="password" id="loginPassInput" required placeholder="Enter password" class="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600">
+                            <i data-lucide="lock" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                            <input type="password" id="authPassword" required minlength="4" placeholder="Enter your password (min 4 chars)" class="w-full pl-9 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600">
                         </div>
                     </div>
 
-                    <div id="loginErrorBox" class="hidden p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium"></div>
+                    <div id="authErrorBox" class="hidden p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-xs text-rose-700 font-medium"></div>
 
-                    <button type="submit" class="w-full py-2.5 px-4 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-semibold rounded-lg shadow-sm transition flex items-center justify-center gap-2 cursor-pointer">
-                        <i data-lucide="unlock" class="w-4 h-4"></i>
-                        <span>Unlock Spreadsheet</span>
+                    <button type="submit" id="authSubmitBtn" class="w-full py-2.5 px-4 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-semibold rounded-lg shadow-sm transition flex items-center justify-center gap-2 cursor-pointer">
+                        <i data-lucide="key-round" class="w-4 h-4"></i>
+                        <span id="authSubmitLabel">Unlock Spreadsheet Vault</span>
                     </button>
                 </form>
 
+                <div class="relative flex py-1 items-center">
+                    <div class="grow border-t border-slate-200"></div>
+                    <span class="shrink mx-3 text-[11px] font-medium text-slate-400 uppercase">Or</span>
+                    <div class="grow border-t border-slate-200"></div>
+                </div>
+
+                <!-- Option B: One-Click Google Sign-In -->
+                <button type="button" onclick="handleGoogleSignIn()" id="googleSignInBtn" class="w-full py-2 px-4 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 shadow-2xs transition flex items-center justify-center gap-2 cursor-pointer">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/>
+                        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24z"/>
+                        <path fill="#FBBC05" d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14z"/>
+                        <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96z"/>
+                    </svg>
+                    <span>Continue with Google Account</span>
+                </button>
+
                 <p class="text-[11px] text-slate-400 text-center leading-relaxed">
-                    Strictly private access. Data syncs automatically across all your devices.
+                    Protected by Owner-Only Access Lock. Once your account is created, only your credentials can unlock and view this spreadsheet vault.
                 </p>
+            </div>
+
+            <!-- Access Denied Screen (If logged in with an unauthorized email) -->
+            <div id="accessDeniedContainer" class="hidden p-6 text-center space-y-4">
+                <div class="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto">
+                    <i data-lucide="shield-alert" class="w-6 h-6"></i>
+                </div>
+                <div>
+                    <h2 class="text-base font-bold text-slate-900">Access Denied — Vault Locked</h2>
+                    <p class="text-xs text-slate-600 mt-1 leading-relaxed">
+                        Signed in as <strong id="deniedEmailDisplay" class="text-slate-900"></strong>, which is not authorized by the owner of this SheetVault.
+                    </p>
+                </div>
+                <button onclick="logoutUser()" class="w-full py-2 px-4 bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold rounded-lg transition cursor-pointer">
+                    Sign Out & Switch Account
+                </button>
             </div>
         </div>
     </div>
 
     <!-- ===================================================================== -->
-    <!-- 2. MAIN SPREADSHEET APPLICATION                                      -->
+    <!-- 2. MAIN SPREADSHEET APPLICATION (HIDDEN UNTIL OWNER AUTHENTICATED)    -->
     <!-- ===================================================================== -->
     <div id="appWorkspace" class="hidden flex-1 flex flex-col h-screen overflow-hidden">
 
@@ -240,13 +294,13 @@
                         <input type="text" id="workbookTitleInput" value="Master Personal Workbook" onchange="updateWorkbookTitle(this.value)" class="bg-transparent hover:bg-white/10 focus:bg-white focus:text-slate-900 text-sm font-bold px-1.5 py-0.5 rounded outline-none transition truncate max-w-[200px] sm:max-w-[300px]">
                         <span id="syncStatusBadge" class="inline-flex items-center gap-1 text-[11px] bg-emerald-900/80 text-emerald-200 px-2 py-0.5 rounded-full border border-emerald-600/50 shrink-0">
                             <i data-lucide="cloud-check" class="w-3 h-3"></i>
-                            <span id="syncStatusText">Synced to Cloud</span>
+                            <span id="syncStatusText">Saved to Cloud</span>
                         </span>
                     </div>
                 </div>
             </div>
 
-            <!-- Right Controls -->
+            <!-- Right Security, Permissions & File Portability Controls -->
             <div class="flex items-center gap-1.5 shrink-0">
                 <button onclick="openFindReplaceModal()" title="Find & Replace (Ctrl+F)" class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-emerald-700 hover:bg-emerald-600 rounded-md transition cursor-pointer">
                     <i data-lucide="search" class="w-3.5 h-3.5"></i>
@@ -271,10 +325,16 @@
 
                 <div class="h-4 w-px bg-emerald-600 mx-0.5"></div>
 
+                <!-- Owner Permissions Button -->
+                <button onclick="openPermissionsModal()" title="Manage Owner Lock & Authorized Emails" class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/40 rounded-md transition cursor-pointer">
+                    <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
+                    <span class="hidden md:inline">Permissions</span>
+                </button>
+
                 <!-- Lock / Logout Button -->
-                <button onclick="lockVault()" title="Lock Vault & Sign Out" class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-md shadow-xs transition cursor-pointer">
+                <button onclick="logoutUser()" title="Lock Vault & Sign Out" class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white rounded-md shadow-xs transition cursor-pointer">
                     <i data-lucide="lock" class="w-3.5 h-3.5"></i>
-                    <span>Lock Vault</span>
+                    <span>Lock / Logout</span>
                 </button>
             </div>
         </header>
@@ -363,45 +423,127 @@
             <button onclick="clearSelectedCells()" title="Clear Selected Cells (Delete)" class="px-2 py-1 rounded hover:bg-slate-200 text-slate-600 cursor-pointer">Clear</button>
         </div>
 
-        <!-- Excel Formula Bar -->
+        <!-- Excel Formula Bar (Name Box + fx Input) -->
         <div class="bg-white border-b border-slate-300 px-2 py-1 flex items-center gap-2 shrink-0">
-            <input type="text" id="nameBoxInput" value="A1" onkeydown="handleNameBoxKey(event)" title="Active Cell Address" class="w-16 text-center font-mono text-xs font-bold bg-slate-100 border border-slate-300 rounded py-1 text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-600">
-            <div class="flex items-center gap-1.5 text-slate-400 font-serif italic font-bold text-sm px-1 select-none">fx</div>
-            <input type="text" id="formulaBarInput" placeholder="Enter value or formula (e.g. =SUM(B2:B10))" oninput="handleFormulaBarInput(this.value)" onkeydown="handleFormulaBarKey(event)" class="flex-1 font-mono text-xs sm:text-[13px] px-2.5 py-1 bg-slate-50 border border-slate-200 rounded focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-600">
-            <button onclick="insertQuickAutoSum()" title="AutoSum" class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-300 rounded transition cursor-pointer">
+            <!-- Active Cell Address Box -->
+            <input type="text" id="nameBoxInput" value="A1" onkeydown="handleNameBoxKey(event)" title="Active Cell Address (Type e.g. D15 and press Enter)" class="w-16 text-center font-mono text-xs font-bold bg-slate-100 border border-slate-300 rounded py-1 text-slate-800 focus:outline-none focus:ring-1 focus:ring-emerald-600">
+
+            <div class="flex items-center gap-1.5 text-slate-400 font-serif italic font-bold text-sm px-1 select-none">
+                fx
+            </div>
+
+            <!-- Formula / Raw Value Input -->
+            <input type="text" id="formulaBarInput" placeholder="Enter value or formula (e.g. =SUM(B2:B10), =AVERAGE(C2:C5), =IF(D2>100, &quot;High&quot;, &quot;Low&quot;))" oninput="handleFormulaBarInput(this.value)" onkeydown="handleFormulaBarKey(event)" class="flex-1 font-mono text-xs sm:text-[13px] px-2.5 py-1 bg-slate-50 border border-slate-200 rounded focus:bg-white focus:outline-none focus:ring-1 focus:ring-emerald-600">
+
+            <!-- Quick AutoSum Button -->
+            <button onclick="insertQuickAutoSum()" title="AutoSum (Insert =SUM formula)" class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-300 rounded transition cursor-pointer">
                 <span>∑ AutoSum</span>
             </button>
         </div>
 
-        <!-- Main Spreadsheet Canvas -->
+        <!-- Main Scrollable Spreadsheet Canvas -->
         <div id="gridViewport" class="flex-1 overflow-auto relative bg-white" onscroll="hideContextMenu()">
             <table id="spreadsheetTable" class="grid-table">
                 <thead id="gridHead"></thead>
                 <tbody id="gridBody"></tbody>
             </table>
+
+            <!-- Floating Inline Cell Editor -->
             <input type="text" id="cellEditorInput" class="hidden font-mono" onkeydown="handleEditorKeyDown(event)" onblur="commitInlineEditor()">
+
+            <!-- Expand Grid Footer Buttons -->
             <div class="p-3 bg-slate-50 border-t border-slate-200 flex items-center gap-3 text-xs">
-                <button onclick="appendMoreRows(25)" class="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-md font-medium text-slate-700 shadow-2xs cursor-pointer">+ Add 25 More Rows</button>
-                <button onclick="appendMoreCols(5)" class="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-md font-medium text-slate-700 shadow-2xs cursor-pointer">+ Add 5 More Columns</button>
-                <span class="text-slate-400">Tip: Double-click any cell or start typing to edit. Drag across cells for live Sum/Avg stats.</span>
+                <button onclick="appendMoreRows(25)" class="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-md font-medium text-slate-700 shadow-2xs cursor-pointer">
+                    + Add 25 More Rows
+                </button>
+                <button onclick="appendMoreCols(5)" class="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 rounded-md font-medium text-slate-700 shadow-2xs cursor-pointer">
+                    + Add 5 More Columns
+                </button>
+                <span class="text-slate-400">Tip: Double-click any cell or start typing to edit. Drag across cells for live Sum/Avg stats. Right-click headers for options.</span>
             </div>
         </div>
 
-        <!-- Bottom Multi-Sheet Tabs & Status Bar -->
+        <!-- Bottom Multi-Sheet Tabs & Live Status Bar -->
         <footer class="bg-slate-100 border-t border-slate-300 px-2 py-1 flex flex-wrap items-center justify-between gap-2 shrink-0 text-xs">
+            <!-- Worksheet Tabs Container -->
             <div class="flex items-center gap-1 overflow-x-auto max-w-full sm:max-w-[60%]">
-                <button onclick="addNewSheet()" title="Add New Sheet" class="p-1.5 rounded hover:bg-slate-200 text-slate-700 shrink-0 cursor-pointer"><i data-lucide="plus" class="w-4 h-4"></i></button>
-                <div id="sheetTabsList" class="flex items-center gap-1"></div>
+                <button onclick="addNewSheet()" title="Add New Sheet" class="p-1.5 rounded hover:bg-slate-200 text-slate-700 shrink-0 cursor-pointer">
+                    <i data-lucide="plus" class="w-4 h-4"></i>
+                </button>
+                <div id="sheetTabsList" class="flex items-center gap-1">
+                    <!-- Sheet tabs rendered dynamically -->
+                </div>
             </div>
+
+            <!-- Live Excel Selection Aggregations (Sum, Average, Count, Min, Max) -->
             <div id="statusBarAggregations" class="flex items-center gap-3 text-[11px] font-mono text-slate-600 px-2">
                 <span>Ready</span>
             </div>
         </footer>
     </div>
 
-    <!-- Modals -->
-    <div id="headerContextMenu" class="fixed z-50 hidden bg-white border border-slate-200 rounded-lg shadow-xl py-1 w-48 text-xs text-slate-700"></div>
+    <!-- ===================================================================== -->
+    <!-- 3. CONTEXT MENU & MODALS (PERMISSIONS, FIND & REPLACE, FILTER)        -->
+    <!-- ===================================================================== -->
 
+    <!-- Right-Click Header Context Menu -->
+    <div id="headerContextMenu" class="fixed z-50 hidden bg-white border border-slate-200 rounded-lg shadow-xl py-1 w-48 text-xs text-slate-700">
+        <!-- Populated dynamically -->
+    </div>
+
+    <!-- Owner Permissions & Access Control Modal -->
+    <div id="permissionsModal" class="fixed inset-0 z-50 hidden bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div class="bg-white border border-slate-200 rounded-xl shadow-2xl max-w-lg w-full overflow-hidden">
+            <div class="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="shield-check" class="w-4 h-4 text-emerald-400"></i>
+                    <h3 class="text-sm font-bold">Owner Lock & Access Permissions</h3>
+                </div>
+                <button onclick="closeModal('permissionsModal')" class="text-slate-400 hover:text-white cursor-pointer"><i data-lucide="x" class="w-4 h-4"></i></button>
+            </div>
+            <div class="p-5 space-y-4 text-xs max-h-[82vh] overflow-y-auto">
+                <div class="p-3 bg-emerald-50 border border-emerald-200 rounded-lg space-y-1">
+                    <div class="flex items-center justify-between">
+                        <span class="font-bold text-emerald-900">Primary Vault Owner (Locked)</span>
+                        <span id="permCloudBadge" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-200 text-emerald-900">Cloud Connected</span>
+                    </div>
+                    <div id="permOwnerEmail" class="font-mono text-emerald-800 font-semibold">loading...</div>
+                    <p class="text-emerald-700 text-[11px]">Only you and the authorized users listed below can unlock and view this workbook.</p>
+                </div>
+
+                <!-- Update Master Owner Credentials -->
+                <div class="border border-slate-200 rounded-lg p-3 space-y-2.5 bg-slate-50">
+                    <div class="font-semibold text-slate-800">Update Master Username/Email & Password</div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input type="text" id="updateOwnerUserInput" placeholder="New Username or Email" class="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600">
+                        <input type="password" id="updateOwnerPassInput" placeholder="New Password (min 4 chars)" class="px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600">
+                    </div>
+                    <button onclick="updateMasterOwnerCredentials()" class="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-lg cursor-pointer">
+                        Save New Master Login
+                    </button>
+                </div>
+
+                <!-- Add Additional Authorized User -->
+                <div>
+                    <label class="block font-semibold text-slate-700 mb-1.5">Grant Permission to Another User (Optional)</label>
+                    <div class="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                        <input type="text" id="whitelistEmailInput" placeholder="Username or email" class="sm:col-span-6 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600">
+                        <input type="password" id="whitelistPassInput" placeholder="Password (optional for Google)" class="sm:col-span-4 px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-600">
+                        <button onclick="addAuthorizedEmail()" class="sm:col-span-2 px-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white font-semibold rounded-lg cursor-pointer">Add</button>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="font-semibold text-slate-700 mb-1.5">Authorized Users List</div>
+                    <div id="authorizedUsersList" class="border border-slate-200 rounded-lg divide-y divide-slate-200 max-h-40 overflow-y-auto">
+                        <!-- Rendered dynamically -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Find & Replace Modal -->
     <div id="findReplaceModal" class="fixed inset-0 z-50 hidden bg-slate-950/40 flex items-center justify-center p-4">
         <div class="bg-white border border-slate-200 rounded-xl shadow-2xl max-w-md w-full overflow-hidden">
             <div class="bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
@@ -426,6 +568,7 @@
         </div>
     </div>
 
+    <!-- Column Filter Modal -->
     <div id="colFilterModal" class="fixed inset-0 z-50 hidden bg-slate-950/40 flex items-center justify-center p-4">
         <div class="bg-white border border-slate-200 rounded-xl shadow-2xl max-w-sm w-full overflow-hidden">
             <div class="bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
@@ -443,6 +586,7 @@
         </div>
     </div>
 
+    <!-- Custom Confirm Modal -->
     <div id="customConfirmModal" class="fixed inset-0 z-50 hidden bg-slate-950/60 flex items-center justify-center p-4">
         <div class="bg-white border border-slate-200 rounded-xl shadow-xl max-w-sm w-full p-5 space-y-4">
             <h3 id="confirmModalTitle" class="text-sm font-bold text-slate-900">Confirm</h3>
@@ -451,103 +595,456 @@
         </div>
     </div>
 
+    <!-- Toast Container -->
     <div id="toastBox" class="fixed bottom-10 right-4 z-50 flex flex-col gap-1.5 pointer-events-none"></div>
 
-    <!-- Firebase SDKs for Cross-Browser Cloud Sync -->
+    <!-- ===================================================================== -->
+    <!-- 4. FIREBASE CLOUD & FULL SPREADSHEET ENGINE SCRIPT                    -->
+    <!-- ===================================================================== -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import {
+            getAuth,
+            signInAnonymously,
+            signInWithCustomToken,
+            GoogleAuthProvider,
+            signInWithPopup
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import {
+            getFirestore,
+            doc,
+            getDoc,
+            setDoc,
+            onSnapshot
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'sheetvault-vedant-v1';
-        let db = null;
-        let workbookDocRef = null;
-        let unsubscribeWorkbook = null;
-
+        // ---------------------------------------------------------------------
+        // FIREBASE INITIALIZATION & CROSS-BROWSER SAFETY
+        // ---------------------------------------------------------------------
+        const appId = (typeof __app_id !== 'undefined' && __app_id) ? __app_id : 'sheetvault-default';
+        let firebaseConfig = {};
         try {
-            if (typeof __firebase_config !== 'undefined') {
-                const firebaseConfig = JSON.parse(__firebase_config);
-                const app = initializeApp(firebaseConfig);
-                const auth = getAuth(app);
-                db = getFirestore(app);
-                workbookDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'vault_workbooks', 'master_workbook');
-                
-                // Authenticate silently
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    signInWithCustomToken(auth, __initial_auth_token).catch(() => signInAnonymously(auth));
-                } else {
-                    signInAnonymously(auth).catch(() => {});
-                }
-            }
+            firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "demo", projectId: "demo" };
         } catch (e) {
-            console.warn('Firebase cloud sync running in local-first fallback mode:', e);
+            firebaseConfig = { apiKey: "demo", projectId: "demo" };
         }
 
-        const SESSION_KEY = 'sheetvault_unlocked_vedant';
-        const STORAGE_KEY = 'sheetvault_master_data_v2';
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
 
-        const CORRECT_ID = 'vedant';
-        const CORRECT_PASS = '1047';
+        const ownerConfigDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'vault_config', 'owner_lock');
+        const workbookDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'vault_workbooks', 'master_workbook');
 
-        let workbook = null;
-        let activeCell = { r: 0, c: 0 };
-        let selectionRange = { r1: 0, c1: 0, r2: 0, c2: 0 };
-        let isDraggingSelection = false;
-        let isEditingCell = false;
-        let clipboardCells = null;
-        let undoStack = [];
-        let redoStack = [];
-        let activeColumnFilter = null;
+        const LOCAL_OWNER_CACHE_KEY = `sheetvault_owner_${appId}`;
+        const LOCAL_WORKBOOK_CACHE_KEY = `sheetvault_wb_${appId}`;
+        const SESSION_UNLOCK_KEY = `sheetvault_unlocked_user_${appId}`;
+
+        let firebaseUser = null;
+        let currentUser = null;
+        let ownerConfig = null;
+        let authMode = 'signin';
+        let unsubscribeWorkbook = null;
         let isLocalSavePending = false;
         let saveTimeout = null;
 
-        function initAppGate() {
-            const isUnlocked = sessionStorage.getItem(SESSION_KEY) === 'true';
-            if (isUnlocked) {
-                unlockWorkspace();
-            } else {
-                document.getElementById('authGateScreen').classList.remove('hidden');
-                document.getElementById('appWorkspace').classList.add('hidden');
+        // ---------------------------------------------------------------------
+        // WEB CRYPTO / SHA-256 WITH COMPATIBILITY FALLBACK
+        // ---------------------------------------------------------------------
+        async function hashPassword(password) {
+            try {
+                if (window.crypto && window.crypto.subtle && window.crypto.subtle.digest) {
+                    const encoder = new TextEncoder();
+                    const data = encoder.encode('sheetvault_salt_v1::' + password);
+                    const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
+                    const hashArray = Array.from(new Uint8Array(hashBuffer));
+                    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+                }
+            } catch (err) {
+                console.warn('Crypto subtle digest failed, using fallback hash:', err);
             }
-            lucide.createIcons();
+            // Simple robust fallback hash for older browsers or insecure contexts
+            let hash = 0;
+            const str = 'sheetvault_salt_v1::' + password;
+            for (let i = 0; i < str.length; i++) {
+                hash = ((hash << 5) - hash) + str.charCodeAt(i);
+                hash |= 0;
+            }
+            return 'fallback_hash_' + Math.abs(hash);
         }
 
-        window.handleLoginSubmit = function(e) {
+        // ---------------------------------------------------------------------
+        // FIREBASE AUTHENTICATION & VAULT GATE
+        // ---------------------------------------------------------------------
+        async function ensureFirebaseAuth() {
+            if (auth.currentUser) {
+                firebaseUser = auth.currentUser;
+                return firebaseUser;
+            }
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    const cred = await signInWithCustomToken(auth, __initial_auth_token);
+                    firebaseUser = cred.user;
+                } else {
+                    const cred = await signInAnonymously(auth);
+                    firebaseUser = cred.user;
+                }
+            } catch (err) {
+                console.warn('Silent Firebase auth fallback:', err);
+                try {
+                    const cred = await signInAnonymously(auth);
+                    firebaseUser = cred.user;
+                } catch (e2) {
+                    console.error('Firebase auth unavailable, using local vault mode:', e2);
+                }
+            }
+            return firebaseUser;
+        }
+
+        async function loadOwnerConfigFromCloudOrCache() {
+            await ensureFirebaseAuth();
+            if (firebaseUser) {
+                try {
+                    const snap = await getDoc(ownerConfigDocRef);
+                    if (snap.exists()) {
+                        ownerConfig = snap.data();
+                        localStorage.setItem(LOCAL_OWNER_CACHE_KEY, JSON.stringify(ownerConfig));
+                        return ownerConfig;
+                    }
+                } catch (err) {
+                    console.warn('Could not fetch owner config from Firestore:', err);
+                }
+            }
+            const cached = localStorage.getItem(LOCAL_OWNER_CACHE_KEY);
+            if (cached) {
+                try { ownerConfig = JSON.parse(cached); } catch(e){}
+            }
+            return ownerConfig;
+        }
+
+        async function saveOwnerConfig(newConfig) {
+            ownerConfig = newConfig;
+            try {
+                localStorage.setItem(LOCAL_OWNER_CACHE_KEY, JSON.stringify(ownerConfig));
+            } catch(e){}
+            await ensureFirebaseAuth();
+            if (firebaseUser) {
+                try {
+                    await setDoc(ownerConfigDocRef, ownerConfig);
+                } catch (err) {
+                    console.warn('Cloud sync for owner config queued:', err);
+                }
+            }
+        }
+
+        async function initVaultGate() {
+            const loadingBox = document.getElementById('authLoadingBox');
+            const formContainer = document.getElementById('authFormContainer');
+            const statusText = document.getElementById('ownerStatusText');
+            const banner = document.getElementById('ownerStatusBanner');
+
+            await loadOwnerConfigFromCloudOrCache();
+
+            let savedSessionUser = null;
+            try {
+                savedSessionUser = sessionStorage.getItem(SESSION_UNLOCK_KEY);
+            } catch(e){}
+
+            if (savedSessionUser && ownerConfig) {
+                try {
+                    const parsedSession = JSON.parse(savedSessionUser);
+                    if (isIdentifierAuthorized(parsedSession.identifier)) {
+                        unlockWorkspaceForUser(parsedSession);
+                        return;
+                    }
+                } catch(e){}
+            }
+
+            loadingBox.classList.add('hidden');
+            formContainer.classList.remove('hidden');
+
+            if (!ownerConfig || (!ownerConfig.ownerUsername && !ownerConfig.ownerEmail)) {
+                banner.className = 'p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-2.5';
+                statusText.innerHTML = '<strong>No account set up yet:</strong> Create your own <strong>Username/Email &amp; Password</strong> below (or sign in with Google) to claim ownership and lock this vault.';
+                switchAuthMode('signup');
+            } else {
+                const maskedOwner = ownerConfig.ownerUsername || ownerConfig.ownerEmail;
+                banner.className = 'p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 flex items-start gap-2.5';
+                statusText.innerHTML = `<strong>Vault Locked:</strong> Owned by <span class="font-mono font-semibold">${escapeHtml(maskedOwner)}</span>. Enter your credentials below to unlock.`;
+                switchAuthMode('signin');
+            }
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+
+        function isIdentifierAuthorized(identifier) {
+            if (!ownerConfig || !identifier) return false;
+            const idLower = identifier.trim().toLowerCase();
+            const ownerId = (ownerConfig.ownerUsername || ownerConfig.ownerEmail || '').toLowerCase();
+            if (idLower === ownerId) return true;
+            const extras = ownerConfig.authorizedUsers || [];
+            return extras.some(u => (u.identifier || '').toLowerCase() === idLower);
+        }
+
+        window.switchAuthMode = function(mode) {
+            authMode = mode;
+            const tabIn = document.getElementById('tabSignIn');
+            const tabUp = document.getElementById('tabSignUp');
+            const btnLabel = document.getElementById('authSubmitLabel');
+            document.getElementById('authErrorBox').classList.add('hidden');
+
+            if (mode === 'signin') {
+                tabIn.className = 'py-1.5 rounded-md bg-white text-emerald-700 shadow-xs transition cursor-pointer';
+                tabUp.className = 'py-1.5 rounded-md text-slate-600 hover:text-slate-900 transition cursor-pointer';
+                btnLabel.textContent = 'Unlock Spreadsheet Vault';
+            } else {
+                tabUp.className = 'py-1.5 rounded-md bg-white text-emerald-700 shadow-xs transition cursor-pointer';
+                tabIn.className = 'py-1.5 rounded-md text-slate-600 hover:text-slate-900 transition cursor-pointer';
+                btnLabel.textContent = 'Create Account & Lock Vault';
+            }
+        };
+
+        window.handleAuthSubmit = async function(e) {
             e.preventDefault();
-            const idVal = document.getElementById('loginIdInput').value.trim().toLowerCase();
-            const passVal = document.getElementById('loginPassInput').value.trim();
-            const errBox = document.getElementById('loginErrorBox');
+            const identifier = document.getElementById('authEmail').value.trim();
+            const identifierLower = identifier.toLowerCase();
+            const password = document.getElementById('authPassword').value;
+            const errBox = document.getElementById('authErrorBox');
+            const submitBtn = document.getElementById('authSubmitBtn');
 
             errBox.classList.add('hidden');
+            submitBtn.disabled = true;
+            submitBtn.classList.add('opacity-60');
 
-            if (idVal === CORRECT_ID && passVal === CORRECT_PASS) {
-                sessionStorage.setItem(SESSION_KEY, 'true');
-                unlockWorkspace();
-                showToast('Welcome back, Vedant!');
-            } else {
-                errBox.textContent = 'Incorrect ID or password. Please try again.';
+            try {
+                await loadOwnerConfigFromCloudOrCache();
+                const passHash = await hashPassword(password);
+                const hasExistingOwner = Boolean(ownerConfig && (ownerConfig.ownerUsername || ownerConfig.ownerEmail));
+
+                if (authMode === 'signup') {
+                    if (hasExistingOwner) {
+                        throw new Error(`This vault is already locked by an owner (${ownerConfig.ownerUsername || ownerConfig.ownerEmail}). Switch to "Owner Sign In".`);
+                    }
+                    const newOwnerCfg = {
+                        ownerUsername: identifierLower,
+                        ownerEmail: identifierLower.includes('@') ? identifierLower : '',
+                        ownerPasswordHash: passHash,
+                        authorizedUsers: [],
+                        createdAt: new Date().toISOString()
+                    };
+                    await saveOwnerConfig(newOwnerCfg);
+                    unlockWorkspaceForUser({ identifier: identifierLower, method: 'password' });
+                    showToast('Vault created & locked to your account!');
+                } else {
+                    if (!hasExistingOwner) {
+                        throw new Error('No owner account exists yet. Click "Create Vault Login" above.');
+                    }
+                    const ownerId = (ownerConfig.ownerUsername || ownerConfig.ownerEmail || '').toLowerCase();
+                    if (identifierLower === ownerId) {
+                        if (!ownerConfig.ownerPasswordHash) {
+                            throw new Error('This vault was set up with Google Sign-In. Use Google button.');
+                        }
+                        if (passHash !== ownerConfig.ownerPasswordHash) {
+                            throw new Error('Invalid password for owner account.');
+                        }
+                        unlockWorkspaceForUser({ identifier: identifierLower, method: 'password' });
+                        return;
+                    }
+
+                    const matchedUser = (ownerConfig.authorizedUsers || []).find(
+                        u => (u.identifier || '').toLowerCase() === identifierLower
+                    );
+                    if (!matchedUser) {
+                        throw new Error('Access Denied: This username/email is not authorized.');
+                    }
+                    if (matchedUser.passwordHash && matchedUser.passwordHash !== passHash) {
+                        throw new Error('Invalid password.');
+                    }
+                    unlockWorkspaceForUser({ identifier: identifierLower, method: 'password' });
+                }
+            } catch (err) {
+                errBox.textContent = err.message || 'Authentication failed.';
+                errBox.classList.remove('hidden');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.classList.remove('opacity-60');
+            }
+        };
+
+        window.handleGoogleSignIn = async function() {
+            const errBox = document.getElementById('authErrorBox');
+            errBox.classList.add('hidden');
+            try {
+                const provider = new GoogleAuthProvider();
+                const result = await signInWithPopup(auth, provider);
+                firebaseUser = result.user;
+                const gEmail = (result.user.email || '').toLowerCase();
+
+                await loadOwnerConfigFromCloudOrCache();
+                const hasExistingOwner = Boolean(ownerConfig && (ownerConfig.ownerUsername || ownerConfig.ownerEmail));
+
+                if (!hasExistingOwner) {
+                    const newOwnerCfg = {
+                        ownerUsername: gEmail,
+                        ownerEmail: gEmail,
+                        ownerPasswordHash: '',
+                        authorizedUsers: [],
+                        createdAt: new Date().toISOString()
+                    };
+                    await saveOwnerConfig(newOwnerCfg);
+                    unlockWorkspaceForUser({ identifier: gEmail, method: 'google' });
+                    showToast(`Vault claimed & locked to ${gEmail}`);
+                    return;
+                }
+
+                if (!isIdentifierAuthorized(gEmail)) {
+                    document.getElementById('authFormContainer').classList.add('hidden');
+                    document.getElementById('deniedEmailDisplay').textContent = gEmail;
+                    document.getElementById('accessDeniedContainer').classList.remove('hidden');
+                    if (typeof lucide !== 'undefined') lucide.createIcons();
+                    return;
+                }
+
+                unlockWorkspaceForUser({ identifier: gEmail, method: 'google' });
+            } catch (err) {
+                errBox.textContent = 'Google Sign-In failed: ' + (err.message || 'Popup closed or blocked.');
                 errBox.classList.remove('hidden');
             }
         };
 
-        window.lockVault = function() {
+        function unlockWorkspaceForUser(userSession) {
+            currentUser = userSession;
+            try {
+                sessionStorage.setItem(SESSION_UNLOCK_KEY, JSON.stringify(userSession));
+            } catch(e){}
+
+            document.getElementById('authGateScreen').classList.add('hidden');
+            document.getElementById('appWorkspace').classList.remove('hidden');
+            startWorkbookSync();
+        }
+
+        window.logoutUser = async function() {
             if (unsubscribeWorkbook) {
                 unsubscribeWorkbook();
                 unsubscribeWorkbook = null;
             }
-            sessionStorage.removeItem(SESSION_KEY);
-            document.getElementById('loginPassInput').value = '';
+            try {
+                sessionStorage.removeItem(SESSION_UNLOCK_KEY);
+            } catch(e){}
+            currentUser = null;
+            document.getElementById('authPassword').value = '';
             document.getElementById('appWorkspace').classList.add('hidden');
+            document.getElementById('accessDeniedContainer').classList.add('hidden');
             document.getElementById('authGateScreen').classList.remove('hidden');
+            await initVaultGate();
         };
 
-        async function unlockWorkspace() {
-            document.getElementById('authGateScreen').classList.add('hidden');
-            document.getElementById('appWorkspace').classList.remove('hidden');
-            await loadAndSyncWorkbook();
-            renderAllSpreadsheetUI();
+        // ---------------------------------------------------------------------
+        // OWNER PERMISSIONS & MODALS
+        // ---------------------------------------------------------------------
+        window.openPermissionsModal = function() {
+            if (!ownerConfig) return;
+            const ownerDisplay = ownerConfig.ownerUsername || ownerConfig.ownerEmail;
+            document.getElementById('permOwnerEmail').textContent = ownerDisplay;
+            document.getElementById('updateOwnerUserInput').value = ownerDisplay;
+            document.getElementById('updateOwnerPassInput').value = '';
+            document.getElementById('permCloudBadge').textContent = firebaseUser ? 'Cloud Sync Active' : 'Local Cache Mode';
+            renderAuthorizedUsersList();
+            document.getElementById('permissionsModal').classList.remove('hidden');
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        };
+
+        window.updateMasterOwnerCredentials = async function() {
+            const newUser = document.getElementById('updateOwnerUserInput').value.trim().toLowerCase();
+            const newPass = document.getElementById('updateOwnerPassInput').value;
+            if (!newUser) {
+                showToast('Username/Email cannot be empty');
+                return;
+            }
+            if (newPass && newPass.length < 4) {
+                showToast('Password must be at least 4 characters');
+                return;
+            }
+
+            ownerConfig.ownerUsername = newUser;
+            if (newUser.includes('@')) ownerConfig.ownerEmail = newUser;
+            if (newPass) {
+                ownerConfig.ownerPasswordHash = await hashPassword(newPass);
+            }
+
+            await saveOwnerConfig(ownerConfig);
+            currentUser.identifier = newUser;
+            try {
+                sessionStorage.setItem(SESSION_UNLOCK_KEY, JSON.stringify(currentUser));
+            } catch(e){}
+            document.getElementById('permOwnerEmail').textContent = newUser;
+            document.getElementById('updateOwnerPassInput').value = '';
+            renderAuthorizedUsersList();
+            showToast('Updated Master Vault credentials!');
+        };
+
+        function renderAuthorizedUsersList() {
+            const listEl = document.getElementById('authorizedUsersList');
+            const ownerId = ownerConfig.ownerUsername || ownerConfig.ownerEmail;
+            const extras = ownerConfig.authorizedUsers || [];
+
+            let html = `
+                <div class="px-3 py-2 flex items-center justify-between bg-white">
+                    <div class="flex items-center gap-2">
+                        <span class="font-mono text-slate-800">${escapeHtml(ownerId)}</span>
+                        <span class="px-1.5 py-0.5 text-[10px] font-bold bg-emerald-100 text-emerald-800 rounded">OWNER</span>
+                    </div>
+                </div>
+            `;
+
+            extras.forEach(u => {
+                html += `
+                    <div class="px-3 py-2 flex items-center justify-between bg-white">
+                        <div class="flex items-center gap-2">
+                            <span class="font-mono text-slate-800">${escapeHtml(u.identifier)}</span>
+                            <span class="px-1.5 py-0.5 text-[10px] font-medium bg-slate-100 text-slate-600 rounded">ALLOWED</span>
+                        </div>
+                        <button onclick="removeAuthorizedEmail('${escapeHtml(u.identifier)}')" class="text-rose-600 hover:underline font-medium cursor-pointer">Revoke</button>
+                    </div>
+                `;
+            });
+
+            listEl.innerHTML = html;
         }
 
+        window.addAuthorizedEmail = async function() {
+            const idInput = document.getElementById('whitelistEmailInput');
+            const passInput = document.getElementById('whitelistPassInput');
+            const newId = idInput.value.trim().toLowerCase();
+            const rawPass = passInput.value;
+
+            if (!newId) {
+                showToast('Enter a username or email address');
+                return;
+            }
+            const passHash = rawPass ? await hashPassword(rawPass) : '';
+            const list = (ownerConfig.authorizedUsers || []).filter(u => (u.identifier || '').toLowerCase() !== newId);
+            list.push({ identifier: newId, passwordHash: passHash });
+            ownerConfig.authorizedUsers = list;
+
+            await saveOwnerConfig(ownerConfig);
+            idInput.value = '';
+            passInput.value = '';
+            renderAuthorizedUsersList();
+            showToast(`Authorized ${newId}`);
+        };
+
+        window.removeAuthorizedEmail = async function(idToRemove) {
+            ownerConfig.authorizedUsers = (ownerConfig.authorizedUsers || []).filter(
+                u => (u.identifier || '').toLowerCase() !== idToRemove.toLowerCase()
+            );
+            await saveOwnerConfig(ownerConfig);
+            renderAuthorizedUsersList();
+            showToast(`Revoked access for ${idToRemove}`);
+        };
+
+        // ---------------------------------------------------------------------
+        // SPREADSHEET ENGINE & WORKBOOK MODEL
+        // ---------------------------------------------------------------------
         function createDefaultWorkbook() {
             return {
                 title: 'Master Personal Workbook',
@@ -580,92 +1077,106 @@
                             'A4': { raw: 'Total Monthly Cost', style: { bold: true } },
                             'C4': { raw: '=SUM(C2:C3)', style: { bold: true, numFormat: 'currency_inr', align: 'right', bgColor: '#f1f5f9' } }
                         }
+                    },
+                    {
+                        id: 'sheet-2',
+                        name: 'Movies & Links',
+                        rowCount: 35,
+                        colCount: 14,
+                        freezeRow1: true,
+                        colWidths: { 0: 200, 1: 120, 2: 120, 3: 240 },
+                        rowHeights: {},
+                        cells: {
+                            'A1': { raw: 'Name', style: { bold: true, bgColor: '#e0e7ff', color: '#1e1b4b' } },
+                            'B1': { raw: 'Platform', style: { bold: true, bgColor: '#e0e7ff', color: '#1e1b4b' } },
+                            'C1': { raw: 'Score', style: { bold: true, bgColor: '#e0e7ff', color: '#1e1b4b', align: 'center' } },
+                            'D1': { raw: 'Details', style: { bold: true, bgColor: '#e0e7ff', color: '#1e1b4b' } }
+                        }
                     }
                 ]
             };
         }
 
-        async function loadAndSyncWorkbook() {
-            // Load local cache first for instant render
-            const cached = localStorage.getItem(STORAGE_KEY);
-            if (cached) {
-                try {
-                    workbook = JSON.parse(cached);
-                } catch (e) {
-                    workbook = createDefaultWorkbook();
-                }
-            } else {
-                workbook = createDefaultWorkbook();
-            }
+        let workbook = createDefaultWorkbook();
+        let activeCell = { r: 0, c: 0 };
+        let selectionRange = { r1: 0, c1: 0, r2: 0, c2: 0 };
+        let isDraggingSelection = false;
+        let isEditingCell = false;
+        let clipboardCells = null;
+        let undoStack = [];
+        let redoStack = [];
+        let activeColumnFilter = null;
 
-            if (!db || !workbookDocRef) {
+        async function startWorkbookSync() {
+            if (unsubscribeWorkbook) unsubscribeWorkbook();
+
+            const cachedWb = localStorage.getItem(LOCAL_WORKBOOK_CACHE_KEY);
+            if (cachedWb) {
+                try { workbook = JSON.parse(cachedWb); } catch (e) {}
+            }
+            renderAllSpreadsheetUI();
+
+            await ensureFirebaseAuth();
+            if (!firebaseUser) {
                 updateSyncBadge('Saved Locally', false);
                 return;
             }
 
-            try {
-                const docSnap = await getDoc(workbookDocRef);
+            unsubscribeWorkbook = onSnapshot(workbookDocRef, async (docSnap) => {
+                if (isLocalSavePending) return;
+
                 if (!docSnap.exists()) {
                     await setDoc(workbookDocRef, { payload: JSON.stringify(workbook), updatedAt: new Date().toISOString() });
                 } else {
-                    const data = docSnap.data();
-                    if (data && data.payload) {
-                        workbook = JSON.parse(data.payload);
-                        localStorage.setItem(STORAGE_KEY, data.payload);
-                    }
-                }
-            } catch (err) {
-                console.warn('Cloud load warning:', err);
-            }
-
-            // Start real-time Firestore listener across different browsers
-            if (unsubscribeWorkbook) unsubscribeWorkbook();
-            try {
-                unsubscribeWorkbook = onSnapshot(workbookDocRef, (docSnap) => {
-                    if (isLocalSavePending) return;
-                    if (docSnap.exists()) {
+                    try {
                         const data = docSnap.data();
                         if (data && data.payload) {
-                            try {
-                                const cloudWb = JSON.parse(data.payload);
-                                workbook = cloudWb;
-                                localStorage.setItem(STORAGE_KEY, data.payload);
-                                renderAllSpreadsheetUI();
-                                updateSyncBadge('Synced to Cloud', false);
-                            } catch (e) {}
+                            workbook = JSON.parse(data.payload);
+                            localStorage.setItem(LOCAL_WORKBOOK_CACHE_KEY, data.payload);
                         }
+                    } catch (err) {
+                        console.error('Failed parsing payload:', err);
                     }
-                }, () => {
-                    updateSyncBadge('Saved Locally', false);
-                });
-            } catch (e) {}
+                }
+                renderAllSpreadsheetUI();
+                updateSyncBadge('Saved to Cloud', false);
+            }, (error) => {
+                console.warn('Firestore snapshot error, using local mode:', error);
+                updateSyncBadge('Saved Locally', false);
+            });
         }
 
-        function saveWorkbook() {
+        function scheduleCloudSave() {
             isLocalSavePending = true;
             updateSyncBadge('Saving...', false);
             clearTimeout(saveTimeout);
 
             const serialized = JSON.stringify(workbook);
-            localStorage.setItem(STORAGE_KEY, serialized);
+            try {
+                localStorage.setItem(LOCAL_WORKBOOK_CACHE_KEY, serialized);
+            } catch(e){}
 
             saveTimeout = setTimeout(async () => {
                 try {
-                    if (db && workbookDocRef) {
+                    if (!currentUser) return;
+                    await ensureFirebaseAuth();
+                    if (firebaseUser) {
                         await setDoc(workbookDocRef, {
                             payload: serialized,
-                            updatedAt: new Date().toISOString()
+                            updatedAt: new Date().toISOString(),
+                            updatedBy: currentUser.identifier
                         });
-                        updateSyncBadge('Synced to Cloud', false);
+                        updateSyncBadge('Saved to Cloud', false);
                     } else {
                         updateSyncBadge('Saved Locally', false);
                     }
                 } catch (err) {
+                    console.warn('Cloud save delayed:', err);
                     updateSyncBadge('Saved Locally', false);
                 } finally {
                     isLocalSavePending = false;
                 }
-            }, 400);
+            }, 450);
         }
 
         function updateSyncBadge(text, isError) {
@@ -703,7 +1214,7 @@
             const idx = workbook.sheets.findIndex(s => s.id === sheet.id);
             workbook.sheets[idx] = prev;
             renderAllSpreadsheetUI();
-            saveWorkbook();
+            scheduleCloudSave();
         };
 
         window.redoAction = function() {
@@ -714,10 +1225,12 @@
             const idx = workbook.sheets.findIndex(s => s.id === sheet.id);
             workbook.sheets[idx] = next;
             renderAllSpreadsheetUI();
-            saveWorkbook();
+            scheduleCloudSave();
         };
 
-        // Coordinate & Formula Engine helpers
+        // ---------------------------------------------------------------------
+        // FORMULA & CELL EVALUATION ENGINE
+        // ---------------------------------------------------------------------
         function colIndexToLetters(idx) {
             let s = '';
             let n = idx + 1;
@@ -974,10 +1487,12 @@
             }
 
             if (/^[0-9+\-*/().\s%]+$/.test(rebuilt)) {
-                const val = Function(`"use strict"; return (${rebuilt});`)();
-                if (typeof val === 'number' && !isNaN(val)) {
-                    return Math.round(val * 1000000) / 1000000;
-                }
+                try {
+                    const val = Function(`"use strict"; return (${rebuilt});`)();
+                    if (typeof val === 'number' && !isNaN(val)) {
+                        return Math.round(val * 1000000) / 1000000;
+                    }
+                } catch(e){}
             }
             return rebuilt;
         }
@@ -1018,15 +1533,16 @@
             return String(rawEvaluated);
         }
 
-        // Rendering
+        // ---------------------------------------------------------------------
+        // RENDERING UI
+        // ---------------------------------------------------------------------
         function renderAllSpreadsheetUI() {
-            if (!workbook) return;
             document.getElementById('workbookTitleInput').value = workbook.title || 'Master Personal Workbook';
             renderSheetTabs();
             renderGrid();
             syncToolbarWithActiveCell();
             updateStatusBarAggregations();
-            lucide.createIcons();
+            if (typeof lucide !== 'undefined') lucide.createIcons();
         }
 
         function renderSheetTabs() {
@@ -1134,9 +1650,11 @@
             tbody.innerHTML = bodyHtml;
         }
 
-        // Cell Interactions & Editing
+        // ---------------------------------------------------------------------
+        // SELECTION & INTERACTION
+        // ---------------------------------------------------------------------
         window.handleCellMouseDown = function(e, r, c) {
-            if (e.button !== 0) return;
+            if (e.button !== 0 && e.type !== 'touchstart') return;
             hideContextMenu();
             if (isEditingCell) commitInlineEditor();
 
@@ -1161,7 +1679,9 @@
             updateStatusBarAggregations();
         };
 
-        window.addEventListener('mouseup', () => { isDraggingSelection = false; });
+        window.addEventListener('mouseup', () => {
+            isDraggingSelection = false;
+        });
 
         window.selectEntireColumn = function(c) {
             const sheet = getActiveSheet();
@@ -1327,7 +1847,7 @@
             pushUndoSnapshot();
             sheet.cells[cellId] = { ...existing, raw: rawVal };
             renderAllSpreadsheetUI();
-            saveWorkbook();
+            scheduleCloudSave();
         }
 
         function moveActiveCell(dr, dc, extendSelection = false) {
@@ -1350,38 +1870,92 @@
             if (td) td.scrollIntoView({ block: 'nearest', inline: 'nearest' });
         }
 
-        // Global Keydown
+        // Global Keyboard Shortcuts (Cross-browser safe)
         document.addEventListener('keydown', (e) => {
-            const isUnlocked = sessionStorage.getItem(SESSION_KEY) === 'true';
-            if (!isUnlocked || isEditingCell) return;
+            if (!currentUser || isEditingCell) return;
             const tag = document.activeElement?.tagName;
             if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
 
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undoAction(); return; }
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redoAction(); return; }
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') { e.preventDefault(); toggleCellFormat('bold'); return; }
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') { e.preventDefault(); toggleCellFormat('italic'); return; }
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); openFindReplaceModal(); return; }
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') { e.preventDefault(); copySelection(); return; }
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') { e.preventDefault(); pasteSelection(); return; }
+            const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+            const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+
+            if (cmdOrCtrl && e.key.toLowerCase() === 'z') {
+                e.preventDefault();
+                undoAction();
+                return;
+            }
+            if (cmdOrCtrl && e.key.toLowerCase() === 'y') {
+                e.preventDefault();
+                redoAction();
+                return;
+            }
+            if (cmdOrCtrl && e.key.toLowerCase() === 'b') {
+                e.preventDefault();
+                toggleCellFormat('bold');
+                return;
+            }
+            if (cmdOrCtrl && e.key.toLowerCase() === 'i') {
+                e.preventDefault();
+                toggleCellFormat('italic');
+                return;
+            }
+            if (cmdOrCtrl && e.key.toLowerCase() === 'f') {
+                e.preventDefault();
+                openFindReplaceModal();
+                return;
+            }
+            if (cmdOrCtrl && e.key.toLowerCase() === 'c') {
+                e.preventDefault();
+                copySelection();
+                return;
+            }
+            if (cmdOrCtrl && e.key.toLowerCase() === 'v') {
+                e.preventDefault();
+                pasteSelection();
+                return;
+            }
 
             switch (e.key) {
-                case 'ArrowUp': e.preventDefault(); moveActiveCell(-1, 0, e.shiftKey); break;
-                case 'ArrowDown': e.preventDefault(); moveActiveCell(1, 0, e.shiftKey); break;
-                case 'ArrowLeft': e.preventDefault(); moveActiveCell(0, -1, e.shiftKey); break;
-                case 'ArrowRight': e.preventDefault(); moveActiveCell(0, 1, e.shiftKey); break;
-                case 'Tab': e.preventDefault(); moveActiveCell(0, e.shiftKey ? -1 : 1); break;
-                case 'Enter': e.preventDefault(); openInlineEditor(activeCell.r, activeCell.c); break;
+                case 'ArrowUp':
+                    e.preventDefault();
+                    moveActiveCell(-1, 0, e.shiftKey);
+                    break;
+                case 'ArrowDown':
+                    e.preventDefault();
+                    moveActiveCell(1, 0, e.shiftKey);
+                    break;
+                case 'ArrowLeft':
+                    e.preventDefault();
+                    moveActiveCell(0, -1, e.shiftKey);
+                    break;
+                case 'ArrowRight':
+                    e.preventDefault();
+                    moveActiveCell(0, 1, e.shiftKey);
+                    break;
+                case 'Tab':
+                    e.preventDefault();
+                    moveActiveCell(0, e.shiftKey ? -1 : 1);
+                    break;
+                case 'Enter':
+                    e.preventDefault();
+                    openInlineEditor(activeCell.r, activeCell.c);
+                    break;
                 case 'Delete':
-                case 'Backspace': e.preventDefault(); clearSelectedCells(); break;
+                case 'Backspace':
+                    e.preventDefault();
+                    clearSelectedCells();
+                    break;
                 default:
-                    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                    if (e.key.length === 1 && !cmdOrCtrl && !e.altKey) {
                         e.preventDefault();
                         openInlineEditor(activeCell.r, activeCell.c, e.key);
                     }
             }
         });
 
+        // ---------------------------------------------------------------------
+        // CLIPBOARD, FORMATS & TOOLS
+        // ---------------------------------------------------------------------
         function copySelection() {
             const sheet = getActiveSheet();
             const rMin = Math.min(selectionRange.r1, selectionRange.r2);
@@ -1404,7 +1978,26 @@
                 textRows.push(tsvRow.join('\t'));
             }
             clipboardCells = grid;
+
+            const tsvText = textRows.join('\n');
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(tsvText).catch(() => fallbackCopy(tsvText));
+            } else {
+                fallbackCopy(tsvText);
+            }
             showToast('Copied selection');
+        }
+
+        function fallbackCopy(text) {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            try { document.execCommand('copy'); } catch(e){}
+            document.body.removeChild(ta);
         }
 
         function pasteSelection() {
@@ -1422,7 +2015,7 @@
                 }
             }
             renderAllSpreadsheetUI();
-            saveWorkbook();
+            scheduleCloudSave();
             showToast('Pasted cells');
         }
 
@@ -1451,7 +2044,7 @@
                 }
             }
             renderAllSpreadsheetUI();
-            saveWorkbook();
+            scheduleCloudSave();
         };
 
         window.clearSelectedCells = function() {
@@ -1465,11 +2058,13 @@
             for (let r = rMin; r <= rMax; r++) {
                 for (let c = cMin; c <= cMax; c++) {
                     const id = cellIdFromRC(r, c);
-                    if (sheet.cells[id]) sheet.cells[id].raw = '';
+                    if (sheet.cells[id]) {
+                        sheet.cells[id].raw = '';
+                    }
                 }
             }
             renderAllSpreadsheetUI();
-            saveWorkbook();
+            scheduleCloudSave();
         };
 
         window.insertQuickAutoSum = function() {
@@ -1488,6 +2083,9 @@
             }
         };
 
+        // ---------------------------------------------------------------------
+        // SORTING, FILTERING & RESIZING
+        // ---------------------------------------------------------------------
         window.sortActiveColumn = function(direction) {
             const sheet = getActiveSheet();
             pushUndoSnapshot();
@@ -1532,8 +2130,8 @@
             });
 
             renderAllSpreadsheetUI();
-            saveWorkbook();
-            showToast(`Sorted Column ${colIndexToLetters(col)} (${direction.toUpperCase()})`);
+            scheduleCloudSave();
+            showToast(`Sorted Column ${colIndexToLetters(col)}`);
         };
 
         window.openColumnFilterModal = function() {
@@ -1545,8 +2143,11 @@
 
         window.applyColumnFilter = function() {
             const q = document.getElementById('colFilterInput').value.trim();
-            if (!q) clearColumnFilter();
-            else activeColumnFilter = { sheetId: getActiveSheet().id, col: activeCell.c, query: q };
+            if (!q) {
+                clearColumnFilter();
+            } else {
+                activeColumnFilter = { sheetId: getActiveSheet().id, col: activeCell.c, query: q };
+            }
             closeModal('colFilterModal');
             renderGrid();
         };
@@ -1560,7 +2161,7 @@
             const sheet = getActiveSheet();
             sheet.freezeRow1 = !sheet.freezeRow1;
             renderGrid();
-            saveWorkbook();
+            scheduleCloudSave();
             showToast(sheet.freezeRow1 ? 'Froze Row 1' : 'Unfroze Row 1');
         };
 
@@ -1577,7 +2178,7 @@
                 sheet.cells[cellIdFromRC(targetR, c)] = { raw: '', style: {} };
             }
             renderAllSpreadsheetUI();
-            saveWorkbook();
+            scheduleCloudSave();
         };
 
         window.deleteRowAtActive = function() {
@@ -1593,7 +2194,7 @@
                 delete sheet.cells[cellIdFromRC(sheet.rowCount - 1, c)];
             }
             renderAllSpreadsheetUI();
-            saveWorkbook();
+            scheduleCloudSave();
         };
 
         window.insertColAtActive = function() {
@@ -1607,7 +2208,7 @@
                 sheet.cells[cellIdFromRC(r, targetC)] = { raw: '', style: {} };
             }
             renderAllSpreadsheetUI();
-            saveWorkbook();
+            scheduleCloudSave();
         };
 
         window.deleteColAtActive = function() {
@@ -1621,21 +2222,21 @@
                 delete sheet.cells[cellIdFromRC(r, sheet.colCount - 1)];
             }
             renderAllSpreadsheetUI();
-            saveWorkbook();
+            scheduleCloudSave();
         };
 
         window.appendMoreRows = function(count) {
             const sheet = getActiveSheet();
             sheet.rowCount += count;
             renderGrid();
-            saveWorkbook();
+            scheduleCloudSave();
         };
 
         window.appendMoreCols = function(count) {
             const sheet = getActiveSheet();
             sheet.colCount += count;
             renderGrid();
-            saveWorkbook();
+            scheduleCloudSave();
         };
 
         window.startColResize = function(e, colIdx) {
@@ -1643,6 +2244,7 @@
             const sheet = getActiveSheet();
             const startX = e.clientX;
             const startWidth = sheet.colWidths?.[colIdx] || 115;
+
             const onMove = (ev) => {
                 const newWidth = Math.max(50, startWidth + (ev.clientX - startX));
                 if (!sheet.colWidths) sheet.colWidths = {};
@@ -1652,7 +2254,7 @@
             const onUp = () => {
                 document.removeEventListener('mousemove', onMove);
                 document.removeEventListener('mouseup', onUp);
-                saveWorkbook();
+                scheduleCloudSave();
             };
             document.addEventListener('mousemove', onMove);
             document.addEventListener('mouseup', onUp);
@@ -1663,6 +2265,7 @@
             const sheet = getActiveSheet();
             const startY = e.clientY;
             const startHeight = sheet.rowHeights?.[rowIdx] || 26;
+
             const onMove = (ev) => {
                 const newHeight = Math.max(22, startHeight + (ev.clientY - startY));
                 if (!sheet.rowHeights) sheet.rowHeights = {};
@@ -1672,12 +2275,15 @@
             const onUp = () => {
                 document.removeEventListener('mousemove', onMove);
                 document.removeEventListener('mouseup', onUp);
-                saveWorkbook();
+                scheduleCloudSave();
             };
             document.addEventListener('mousemove', onMove);
             document.addEventListener('mouseup', onUp);
         };
 
+        // ---------------------------------------------------------------------
+        // MULTI-SHEET TABS & IMPORT/EXPORT
+        // ---------------------------------------------------------------------
         window.switchSheet = function(sheetId) {
             if (isEditingCell) commitInlineEditor();
             workbook.activeSheetId = sheetId;
@@ -1687,7 +2293,7 @@
             undoStack = [];
             redoStack = [];
             renderAllSpreadsheetUI();
-            saveWorkbook();
+            scheduleCloudSave();
         };
 
         window.addNewSheet = function() {
@@ -1720,7 +2326,11 @@
                         cls: 'bg-emerald-700 text-white',
                         fn: () => {
                             const val = document.getElementById('renameSheetInput').value.trim();
-                            if (val) { sheet.name = val; renderSheetTabs(); saveWorkbook(); }
+                            if (val) {
+                                sheet.name = val;
+                                renderSheetTabs();
+                                scheduleCloudSave();
+                            }
                             closeModal('customConfirmModal');
                         }
                     }
@@ -1730,7 +2340,10 @@
         };
 
         window.deleteSheetPrompt = function(sheetId) {
-            if (workbook.sheets.length <= 1) { showToast('At least one sheet is required'); return; }
+            if (workbook.sheets.length <= 1) {
+                showToast('At least one sheet is required');
+                return;
+            }
             const sheet = workbook.sheets.find(s => s.id === sheetId);
             openCustomConfirm(
                 'Delete Worksheet',
@@ -1742,9 +2355,11 @@
                         cls: 'bg-rose-600 text-white',
                         fn: () => {
                             workbook.sheets = workbook.sheets.filter(s => s.id !== sheetId);
-                            if (workbook.activeSheetId === sheetId) workbook.activeSheetId = workbook.sheets[0].id;
+                            if (workbook.activeSheetId === sheetId) {
+                                workbook.activeSheetId = workbook.sheets[0].id;
+                            }
                             renderAllSpreadsheetUI();
-                            saveWorkbook();
+                            scheduleCloudSave();
                             closeModal('customConfirmModal');
                         }
                     }
@@ -1754,7 +2369,7 @@
 
         window.updateWorkbookTitle = function(newTitle) {
             workbook.title = newTitle.trim() || 'Master Personal Workbook';
-            saveWorkbook();
+            scheduleCloudSave();
         };
 
         window.openFindReplaceModal = function() {
@@ -1767,6 +2382,7 @@
             const q = document.getElementById('findQueryInput').value.toLowerCase();
             if (!q) return;
             const sheet = getActiveSheet();
+
             for (let r = activeCell.r; r < sheet.rowCount; r++) {
                 const startC = (r === activeCell.r) ? activeCell.c + 1 : 0;
                 for (let c = startC; c < sheet.colCount; c++) {
@@ -1792,6 +2408,7 @@
             const sheet = getActiveSheet();
             pushUndoSnapshot();
             let count = 0;
+
             Object.keys(sheet.cells).forEach(id => {
                 const raw = String(sheet.cells[id].raw || '');
                 if (raw.includes(q)) {
@@ -1799,8 +2416,9 @@
                     count++;
                 }
             });
+
             renderAllSpreadsheetUI();
-            saveWorkbook();
+            scheduleCloudSave();
             document.getElementById('findResultSummary').textContent = `Replaced ${count} occurrence(s).`;
         };
 
@@ -1857,12 +2475,15 @@
                 };
                 rows.forEach((rowArr, r) => {
                     rowArr.forEach((val, c) => {
-                        newSheet.cells[cellIdFromRC(r, c)] = { raw: val, style: r === 0 ? { bold: true, bgColor: '#dcfce7' } : {} };
+                        newSheet.cells[cellIdFromRC(r, c)] = {
+                            raw: val,
+                            style: r === 0 ? { bold: true, bgColor: '#dcfce7' } : {}
+                        };
                     });
                 });
                 workbook.sheets.push(newSheet);
                 switchSheet(newSheet.id);
-                showToast(`Imported ${rows.length} rows into "${newSheet.name}"`);
+                showToast(`Imported ${rows.length} rows`);
                 event.target.value = '';
             };
             reader.readAsText(file);
@@ -1876,15 +2497,28 @@
             for (let i = 0; i < text.length; i++) {
                 const ch = text[i];
                 const next = text[i + 1];
-                if (ch === '"' && inQuotes && next === '"') { current += '"'; i++; }
-                else if (ch === '"') { inQuotes = !inQuotes; }
-                else if (ch === ',' && !inQuotes) { row.push(current); current = ''; }
-                else if ((ch === '\n' || (ch === '\r' && next === '\n')) && !inQuotes) {
+                if (ch === '"' && inQuotes && next === '"') {
+                    current += '"';
+                    i++;
+                } else if (ch === '"') {
+                    inQuotes = !inQuotes;
+                } else if (ch === ',' && !inQuotes) {
+                    row.push(current);
+                    current = '';
+                } else if ((ch === '\n' || (ch === '\r' && next === '\n')) && !inQuotes) {
                     if (ch === '\r') i++;
-                    row.push(current); rows.push(row); row = []; current = '';
-                } else { current += ch; }
+                    row.push(current);
+                    rows.push(row);
+                    row = [];
+                    current = '';
+                } else {
+                    current += ch;
+                }
             }
-            if (current !== '' || row.length > 0) { row.push(current); rows.push(row); }
+            if (current !== '' || row.length > 0) {
+                row.push(current);
+                rows.push(row);
+            }
             return rows;
         }
 
@@ -1989,7 +2623,8 @@
             setTimeout(() => el.remove(), 2400);
         }
 
-        initAppGate();
+        if (typeof lucide !== 'undefined') lucide.createIcons();
+        initVaultGate();
     </script>
 </body>
 </html>
